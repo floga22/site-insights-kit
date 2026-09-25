@@ -1,0 +1,15 @@
+# Only needed if you deploy from the command line with wrangler.
+# Copy to wrangler.toml and fill in. Never put FP_SECRET here —
+# set it with:  npx wrangler secret put FP_SECRET
+name = "site-insights"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+FP_REGION = "us"
+ALLOWED_ORIGINS = "https://example.com,https://www.example.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "site-insights"
+database_id = "YOUR_D1_DATABASE_ID"

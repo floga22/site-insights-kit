@@ -1,0 +1,39 @@
+<!-- site-insights-kit: paste into the <head> of every page. Delete any line you don't use;
+     a module with no ID simply stays off. All values here are public by design. -->
+<script>
+  window.INSIGHTS_CONFIG = {
+    site: "example.com",
+    ownerName: "Your Name",
+    contactEmail: "you@example.com",
+    consent: "none",                 // "none" | "eu-only" | "all"
+
+    ga4: "G-XXXXXXXXXX",             // Google Analytics Measurement ID
+    clarity: "xxxxxxxxxx",           // Microsoft Clarity Project ID
+    fingerprint: {                   // Fingerprint JS agent v4, PUBLIC key only
+      key: "PUBLIC_API_KEY",
+      region: "us",
+      endpoint: "https://metrics.example.com"   // optional custom subdomain; remove if none
+    },
+    worker: "https://site-insights.YOUR-SUBDOMAIN.workers.dev",
+    clickstream: true,               // requires worker
+
+    debug: false                     // true = log to browser console
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/gh/floga22/site-insights-kit@v1.1.0/src/insights.js" defer></script>
+
+<!-- Optional, in your footer, to place the Privacy link exactly:
+     <span id="insights-privacy"></span>
+     Otherwise it's added to the first <footer> automatically.
+
+     Optional, to track a button or link as a conversion:
+     <a href="..." data-track="book_call">Book a call</a>
+
+     Typeform embed: add data-tf-on-submit="insightsTypeformSubmit" to the embed div
+     to record form submissions as a conversion (GA4 generate_lead + Clarity event).
+
+     Exclude your own visits: open any page once per browser with ?insights=owner
+     (undo with ?insights=reset).
+
+     Optional, match colors to your site:
+     <style>:root{--insights-accent:#1f5fa8;--insights-bg:#fff;--insights-text:#1d232b}</style> -->
