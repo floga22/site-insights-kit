@@ -7,7 +7,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.1.0";
+  var VERSION = "1.2.0";
   var cfg = window.INSIGHTS_CONFIG || {};
   var CONSENT_KEY = "insights_consent";
   var started = false;
@@ -150,6 +150,9 @@
         window.INSIGHTS_VISITOR = { visitorId: visitorId, eventId: eventId };
         clarity("identify", visitorId, null, null, "FP-" + String(visitorId).slice(0, 6));
         tag("Fingerprint_ID", visitorId);
+        // Make the stable device ID available in GA4 as a user property and as an event parameter
+        gtag("set", "user_properties", { fingerprint_id: visitorId });
+        gtag("event", "fp_identified", { fingerprint_id: visitorId, fp_event_id: eventId });
         tag("FP_Event_ID", eventId);
         if (r.suspect_score !== undefined) tag("FP_Suspect_Score", r.suspect_score);
         stream.visitorId = visitorId;

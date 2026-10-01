@@ -35,12 +35,14 @@ A "Privacy" link is added to the site footer. It opens a notice written automati
 modules that are switched on. Set `consent` to `"eu-only"` or `"all"` to require opt-in before anything loads.
 
 ## Versions
-Sites load a pinned version from jsDelivr (for example `@v1.1.0`), so updates here never change a live site
+Sites load a pinned version from jsDelivr (for example `@v1.2.0`), so updates here never change a live site
 until its version number is changed.
 
 MIT License.
 
 ## Changelog
+- **1.2.0**: With Fingerprint enabled, GA4 now receives the visitor ID as the `fingerprint_id` user property
+  and an `fp_identified` event (`fingerprint_id`, `fp_event_id`).
 - **1.1.0**: Fingerprint JS agent v4 and Server API v4, custom subdomain support (`fingerprint.endpoint`),
   owner exclusion switch, Typeform submit conversions, Suspect Score.
 - **1.0.0**: Initial release.
