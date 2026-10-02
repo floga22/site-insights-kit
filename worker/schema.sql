@@ -37,3 +37,29 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_sid ON events(sid);
 CREATE INDEX IF NOT EXISTS idx_events_visitor ON events(visitor_id);
+
+-- Thumbmark (optional second device ID). Values are reported by the visitor's browser: use for comparison, not enforcement.
+-- Existing installs: run just this block in the D1 console. NULL = Thumbmark did not report that signal.
+CREATE TABLE IF NOT EXISTS thumbmark_visits (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts            TEXT NOT NULL,
+  site          TEXT,
+  sid           TEXT,               -- joins to visits.sid and events.sid
+  path          TEXT,
+  fp_visitor_id TEXT,               -- Fingerprint visitorId for the same page load, if it resolved
+  tm_visitor_id TEXT,               -- Thumbmark visitorId
+  thumbmark     TEXT,               -- 32-char device hash
+  bot INTEGER, vpn INTEGER, tor INTEGER, datacenter INTEGER,
+  danger_level  REAL,               -- Thumbmark 0-5 threat level
+  uniqueness    REAL,               -- how distinctive the device looks (not a re-identification accuracy)
+  country       TEXT,
+  asn           INTEGER,
+  is_new        INTEGER,
+  first_seen    TEXT,
+  last_seen     TEXT,
+  tz_mismatch   INTEGER,            -- 1 = browser timezone doesn't match IP country
+  lib_version   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tm_sid ON thumbmark_visits(sid);
+CREATE INDEX IF NOT EXISTS idx_tm_tm ON thumbmark_visits(tm_visitor_id);
+CREATE INDEX IF NOT EXISTS idx_tm_fp ON thumbmark_visits(fp_visitor_id);

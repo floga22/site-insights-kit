@@ -7,7 +7,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.2.0";
+  var VERSION = "1.3.0";
   var cfg = window.INSIGHTS_CONFIG || {};
   var CONSENT_KEY = "insights_consent";
   var started = false;
@@ -131,9 +131,13 @@
   }
 
   // ---------- module: Fingerprint + Worker enrichment ----------
+  var fpDone = null; // resolves to the Fingerprint visitorId (or null) so other modules can pair IDs
+
   function startFingerprint() {
     var fp = cfg.fingerprint;
     if (!fp || !fp.key) return;
+    var fpResolve;
+    fpDone = new Promise(function (res) { fpResolve = res; });
     // JS agent v4. With a custom subdomain, the agent and its requests go through your own domain.
     var base = fp.endpoint ? fp.endpoint.replace(/\/+$/, "") : null;
     var src = fp.scriptUrl || (base ? base + "/web/v4/" : "https://fpjscdn.net/v4/") + encodeURIComponent(fp.key);
@@ -148,6 +152,7 @@
         var visitorId = r.visitor_id || r.visitorId;
         var eventId = r.event_id || r.requestId;
         window.INSIGHTS_VISITOR = { visitorId: visitorId, eventId: eventId };
+        fpResolve(visitorId);
         clarity("identify", visitorId, null, null, "FP-" + String(visitorId).slice(0, 6));
         tag("Fingerprint_ID", visitorId);
         // Make the stable device ID available in GA4 as a user property and as an event parameter
@@ -160,6 +165,7 @@
         return enrich({ visitorId: visitorId, eventId: eventId });
       })
       .catch(function (e) {
+        fpResolve(null);
         tag("Fingerprint_ID", "error");
         tag("FP_Error", (e && (e.code || e.message)) || e);
         log("Fingerprint error", e);
@@ -200,6 +206,119 @@
         log("Enriched", d);
       })
       .catch(function (e) { log("Enrich failed", e); });
+  }
+
+  // ---------- module: Thumbmark (second device ID) ----------
+  // The Thumbmark API key is PUBLIC by design: lock it to your domains under "Allowed Hostnames" in the
+  // Thumbmark console, then put it in the page config like the Fingerprint public key.
+  // Results are stored through the Worker for side-by-side comparison with Fingerprint. They are reported
+  // by the browser, so treat them as unverified; Fingerprint's server-side lookup is the authoritative record.
+  var TM_VERSION = "1.12.0";
+  var TM_SCRIPT = "https://cdn.jsdelivr.net/npm/@thumbmarkjs/thumbmarkjs@" + TM_VERSION + "/dist/thumbmark.umd.js";
+  var TM_INTEGRITY = "sha384-aHYVL5I+YZfDdzyp6EIxeCZt9hOF71czkM7DS5u2CvanDXdcaBZK3O2yJ6oECmN/";
+  var TM_CACHE_KEY = "insights_tm";
+
+  // Keep only the verdicts. Raw browser components are never sent to your Worker.
+  function compactThumbmark(r) {
+    r = r || {};
+    var i = r.info || {};
+    var c = i.classification || {};
+    var v = i.visitor || {};
+    var ip = i.ip_address || {};
+    var co = i.country || {};
+    return {
+      visitorId: r.visitorId || v.id || null,
+      thumbmark: r.thumbmark || null,
+      bot: c.bot,
+      vpn: c.vpn,
+      tor: c.tor,
+      datacenter: c.datacenter,
+      dangerLevel: c.danger_level,
+      uniqueness: i.uniqueness ? i.uniqueness.score : undefined,
+      country: co.iso_code,
+      asn: ip.autonomous_system_number,
+      isNew: v.isNew,
+      firstSeen: v.firstSeen,
+      lastSeen: v.lastSeen,
+      tzMismatch: i.signals ? i.signals.timezone_country_mismatch : undefined,
+      libVersion: r.version
+    };
+  }
+
+  function loadThumbmark(tmc) {
+    return new Promise(function (resolve, reject) {
+      function go() {
+        try {
+          // logging:false stops the library's own telemetry post and its runtime-fetched "experimental" script.
+          var opts = { api_key: tmc.key, logging: tmc.logging === true };
+          if (tmc.stabilize) opts.stabilize = tmc.stabilize;      // e.g. ["private", "iframe", "vpn"]
+          if (tmc.beacon === false) opts.collect_beacon = false;  // opt out of Thumbmark's one-shot collector beacon
+          resolve(new window.ThumbmarkJS.Thumbmark(opts).get());
+        } catch (e) { reject(e); }
+      }
+      if (window.ThumbmarkJS && window.ThumbmarkJS.Thumbmark) return go();
+      var attrs = tmc.scriptUrl
+        ? (tmc.integrity ? { integrity: tmc.integrity, crossorigin: "anonymous" } : null)
+        : { integrity: TM_INTEGRITY, crossorigin: "anonymous" };
+      var s = loadScript(tmc.scriptUrl || TM_SCRIPT, attrs);
+      s.onload = go;
+      s.onerror = function () { reject(new Error("thumbmark script failed to load")); };
+    });
+  }
+
+  function sendThumbmark(c, fpId) {
+    var url = workerUrl("/thumbmark");
+    if (!url) return;
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        site: cfg.site || location.hostname,
+        sid: sessionId(),
+        path: location.pathname,
+        fpVisitorId: fpId || null,
+        tm: c
+      })
+    }).catch(function (e) { log("Thumbmark store failed", e); });
+  }
+
+  function startThumbmark() {
+    var tmc = cfg.thumbmark;
+    if (!tmc || !tmc.key) return;
+
+    // One Thumbmark API call per browser session (free tier is 1,000 calls/month); later pages reuse the result.
+    var cached = null;
+    try { cached = JSON.parse(sessionStorage.getItem(TM_CACHE_KEY) || "null"); } catch (e) {}
+    var run = cached ? Promise.resolve(cached) : loadThumbmark(tmc).then(function (r) {
+      var c = compactThumbmark(r);
+      if (c.visitorId) { try { sessionStorage.setItem(TM_CACHE_KEY, JSON.stringify(c)); } catch (e) {} }
+      return c;
+    });
+
+    run.then(function (c) {
+      if (!c || !c.visitorId) { tag("Thumbmark_ID", "none"); return; }
+      window.INSIGHTS_THUMBMARK = c;
+      tag("Thumbmark_ID", c.visitorId);
+      tag("TM_Bot", c.bot);
+      tag("TM_VPN", c.vpn);
+      tag("TM_Datacenter", c.datacenter);
+      tag("TM_Danger_Level", c.dangerLevel);
+      tag("TM_Uniqueness", c.uniqueness);
+      // With no Fingerprint module, Thumbmark supplies the replay identity
+      if (!(cfg.fingerprint && cfg.fingerprint.key)) clarity("identify", c.visitorId, null, null, "TM-" + String(c.visitorId).slice(0, 6));
+      gtag("set", "user_properties", { thumbmark_id: c.visitorId });
+      gtag("event", "tm_identified", { thumbmark_id: c.visitorId });
+      log("Thumbmark", c);
+      // Pair with the Fingerprint ID when it resolves (wait up to 5s; send alone if it doesn't)
+      var wait = fpDone
+        ? Promise.race([fpDone, new Promise(function (res) { setTimeout(function () { res(null); }, 5000); })])
+        : Promise.resolve(null);
+      return wait.then(function (fpId) { return sendThumbmark(c, fpId); });
+    }).catch(function (e) {
+      tag("Thumbmark_ID", "error");
+      tag("TM_Error", (e && (e.code || e.message)) || e);
+      log("Thumbmark error", e);
+    });
   }
 
   // ---------- module: clickstream ----------
@@ -317,6 +436,7 @@
     if (cfg.ga4) items.push("<strong>Google Analytics</strong> records pages viewed, how you arrived (referring site or campaign link), approximate location, and device type. It uses cookies.");
     if (cfg.clarity) items.push("<strong>Microsoft Clarity</strong> records clicks, scrolling, and mouse movement as session replays and heatmaps. Text you type is masked. It uses cookies.");
     if (cfg.fingerprint && cfg.fingerprint.key) items.push("<strong>Fingerprint</strong> creates a device identifier from browser and device characteristics to recognize returning devices and detect bots, VPNs, and automated traffic.");
+    if (cfg.thumbmark && cfg.thumbmark.key) items.push("<strong>Thumbmark</strong> creates a second device identifier from browser characteristics and checks the connection for VPNs, data centers, and bots. These details are sent to Thumbmark for analysis.");
     if (cfg.worker) items.push("<strong>Network and activity log</strong> stores your IP address, network provider, approximate location" + (cfg.clickstream ? ", and the pages and links you click" : "") + " in a private database controlled by " + owner + ".");
     var contact = cfg.contactEmail
       ? ' To ask a question or request deletion of data about your visit, email <a href="mailto:' + cfg.contactEmail + '">' + cfg.contactEmail + "</a>."
@@ -403,7 +523,8 @@
     startClarity();
     startClickTracking();
     if (cfg.clickstream) startClickstream();
-    startFingerprint();
+    startFingerprint(); // must run before startThumbmark so fpDone exists
+    startThumbmark();
   }
 
   function boot() {

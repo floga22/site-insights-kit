@@ -9,6 +9,10 @@
  * POST /collect  { site, sid, visitorId, events: [...] }
  *   Stores clickstream events in D1.
  *
+ * POST /thumbmark  { site, sid, path, fpVisitorId, tm: {...} }
+ *   Stores Thumbmark's verdicts (browser-reported, unverified) in D1 for comparison with Fingerprint.
+ *   Needs no secret: the Thumbmark key is public and is restricted by Allowed Hostnames in its console.
+ *
  * Required settings (Cloudflare dashboard → Worker → Settings):
  *   Binding   DB               D1 database created from schema.sql
  *   Secret    FP_SECRET        Fingerprint secret API key (optional; without it, network data only)
@@ -56,6 +60,7 @@ export default {
     try {
       if (path === "/enrich") return json(await enrich(body, request, env), 200, cors);
       if (path === "/collect") return json(await collect(body, env), 200, cors);
+      if (path === "/thumbmark") return json(await thumbmark(body, env), 200, cors);
       return json({ error: "not found" }, 404, cors);
     } catch (e) {
       return json({ error: "server error", detail: String(e && e.message) }, 500, cors);
@@ -177,6 +182,30 @@ function isWorkHours(tz) {
   } catch {
     return null;
   }
+}
+
+// ---------------- /thumbmark ----------------
+// Thumbmark's verdicts are computed by Thumbmark's API but relayed by the visitor's browser, so a caller who
+// bypasses the page could post anything. Stored for comparison only: do not make security decisions from these rows.
+// Every field is whitelisted and coerced; raw strings are clipped.
+const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+async function thumbmark(b, env) {
+  if (!env.DB) return { stored: 0 };
+  const t = b.tm && typeof b.tm === "object" ? b.tm : null;
+  if (!t || !t.visitorId) return { stored: 0 };
+  await env.DB.prepare(
+    `INSERT INTO thumbmark_visits
+     (ts, site, sid, path, fp_visitor_id, tm_visitor_id, thumbmark, bot, vpn, tor, datacenter, danger_level,
+      uniqueness, country, asn, is_new, first_seen, last_seen, tz_mismatch, lib_version)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(
+    new Date().toISOString(), clip(b.site, 100), clip(b.sid, 80), clip(b.path), clip(b.fpVisitorId, 80),
+    clip(t.visitorId, 80), clip(t.thumbmark, 80), b01(t.bot), b01(t.vpn), b01(t.tor), b01(t.datacenter),
+    num(t.dangerLevel), num(t.uniqueness), clip(t.country, 8), num(t.asn), b01(t.isNew),
+    clip(t.firstSeen, 40), clip(t.lastSeen, 40), b01(t.tzMismatch), clip(t.libVersion, 20)
+  ).run();
+  return { stored: 1 };
 }
 
 // ---------------- /collect ----------------
