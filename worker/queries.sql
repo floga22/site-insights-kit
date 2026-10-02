@@ -38,3 +38,11 @@ FROM thumbmark_visits WHERE fp_visitor_id IS NOT NULL GROUP BY tm_visitor_id ORD
 SELECT v.ts, v.visitor_id, v.as_org, v.bot AS fp_bot, t.bot AS tm_bot, v.vpn AS fp_vpn, t.vpn AS tm_vpn
 FROM visits v JOIN thumbmark_visits t ON t.sid = v.sid AND t.path = v.path
 WHERE (v.bot = 'bad') <> (t.bot = 1) OR v.vpn IS NOT t.vpn ORDER BY v.ts DESC;
+
+-- Shared networks: IPs used by 3+ different devices in the last 30 days
+-- (an office, a store, public WiFi, or a mobile carrier gateway), whatever the ISP label says.
+SELECT ip, as_org, network_label, COUNT(DISTINCT visitor_id) AS devices, COUNT(*) AS visits, MAX(ts) AS last_seen
+FROM visits
+WHERE ts >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')
+GROUP BY ip HAVING devices >= 3
+ORDER BY devices DESC;
