@@ -27,8 +27,8 @@ const pick = (v) => (v && typeof v === "object" ? v.result ?? v.data?.result ?? 
 
 // Network-owner patterns. Order matters: gateway is checked before hosting.
 const GATEWAY = /zscaler|netskope|cisco umbrella|opendns|palo alto|prisma|forcepoint|iboss|menlo security|cato networks|skyhigh|mcafee|symantec|broadcom|versa networks|checkpoint|check point/i;
-const MOBILE = /t-mobile|verizon wireless|cellco|at&t mobility|mobility|sprint|us cellular|cricket|boost|vodafone|telcel|movistar|claro|orange mobile|ee limited|wireless/i;
-const RESIDENTIAL = /comcast|charter|spectrum|cox commun|at&t|att-internet|verizon|frontier|centurylink|lumen|windstream|brightspeed|altice|optimum|suddenlink|mediacom|google fiber|rcn|wideopenwest|astound|sonic|ziply|consolidated|tds telecom|hughes|viasat|starlink|space exploration|rogers|bell canada|shaw|telus|videotron|virgin media|sky uk|british telecom|bt public|talktalk|deutsche telekom|telefonica|telmex|izzi|totalplay|cantv|intercable|netuno/i;
+const MOBILE = /t-mobile|verizon wireless|cellco|at&t mobility|mobility|sprint|us cellular|cricket|boost|vodafone|telcel|movistar|claro|orange mobile|ee limited|wireless|\bmobile\b|movil|cellular|radiomovil/i;
+const RESIDENTIAL = /comcast|charter|spectrum|cox commun|at&t|att-internet|verizon|frontier|centurylink|lumen|windstream|brightspeed|altice|optimum|suddenlink|mediacom|google fiber|rcn|wideopenwest|astound|sonic|ziply|consolidated|tds telecom|hughes|viasat|starlink|space exploration|rogers|bell canada|shaw|telus|videotron|virgin media|sky uk|british telecom|bt public|talktalk|deutsche telekom|telefonica|telmex|izzi|totalplay|cantv|intercable|netuno|uninet|megacable|axtel/i;
 const HOSTING = /amazon|aws|google cloud|google llc|microsoft|azure|digitalocean|linode|akamai|ovh|hetzner|oracle|vultr|choopa|m247|datacamp|leaseweb|contabo|scaleway|alibaba|tencent|hostinger|ionos|godaddy|namecheap|packethub|cdn77|quadranet|colocrossing|psychz|servers\.com|cloudflare|hurricane electric/i;
 const BUSINESS_ISP = /business|enterprise|corporate/i;
 

@@ -78,7 +78,7 @@ All in the Cloudflare dashboard, no command line needed.
 ## Network labels
 | Label | Meaning |
 |---|---|
-| `home` | Residential ISP (Comcast, AT&T, Spectrum…) |
+| `home` | Consumer ISP, usually a home (Comcast, AT&T, Spectrum…). A small shop on a consumer line looks the same: see "Shared networks" below. |
 | `office` | Business ISP line or an unrecognized owner, often a company network. Check `as_org`. |
 | `work-device (gateway)` | Corporate security gateway (Zscaler, Netskope…). Almost certainly a managed work machine. |
 | `mobile` | Mobile carrier |
@@ -88,3 +88,18 @@ All in the Cloudflare dashboard, no command line needed.
 Labels are estimates. A work laptop on home Wi-Fi without a corporate gateway looks like `home`.
 Large tech companies (e.g. Microsoft) share networks with their cloud services and may show as `vpn/hosting`.
 `roaming = 1` means a device first seen on a work network later appeared on home or mobile.
+
+## Shared networks
+A label comes from who owns the network, not from what kind of place it is. A home, a small shop and a café on the same consumer
+ISP all look alike, and mobile carriers put many people behind one IP address. To spot a shared network, look at how many
+different devices use one IP: the "Shared networks" query in `worker/queries.sql` lists IPs with three or more devices in 30 days.
+Mobile locations are also coarse: the city is often the carrier's gateway, not the visitor.
+
+## Hide your own visits from reports
+Your own visits are still collected, so demos and testing keep working. To keep them out of your reports:
+1. D1 → `site-insights` → Console → run `worker/owner-exclusion.sql` once.
+2. Add your home IP and your devices at the bottom of that file (examples are commented out). Only add a network that is yours alone.
+   Never add cellular or public-WiFi IPs: many strangers share them.
+3. Report from the `visits_reporting`, `events_reporting` and `thumbmark_visits_reporting` views instead of the raw tables.
+   Any device seen on one of your IPs is hidden everywhere, so a phone you used at home stays hidden on cellular too.
+4. Check the `owner_review` view now and then to see which devices were hidden automatically.
