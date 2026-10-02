@@ -14,13 +14,18 @@
       region: "us",
       endpoint: "https://metrics.example.com"   // optional custom subdomain; remove if none
     },
+    thumbmark: {                     // optional second device ID. Key is PUBLIC; restrict it to your domains
+      key: "PUBLIC_API_KEY"          // in the Thumbmark console under Allowed Hostnames
+      // beacon: false,              // optional: opt out of Thumbmark's one-shot collector beacon
+      // stabilize: ["private", "iframe", "vpn"]   // optional: keep the ID steady when a visitor toggles a VPN
+    },
     worker: "https://site-insights.YOUR-SUBDOMAIN.workers.dev",
     clickstream: true,               // requires worker
 
     debug: false                     // true = log to browser console
   };
 </script>
-<script src="https://cdn.jsdelivr.net/gh/floga22/site-insights-kit@v1.2.0/src/insights.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/floga22/site-insights-kit@v1.3.0/src/insights.js" defer></script>
 
 <!-- Optional, in your footer, to place the Privacy link exactly:
      <span id="insights-privacy"></span>

@@ -8,6 +8,7 @@ One script (`insights.js`) plus a per-site config block. Any tool whose ID you l
 | Google Analytics 4 | How visitors arrived: referrers, campaigns, search, conversions over time | Google |
 | Microsoft Clarity | What they did: session replays, heatmaps, scroll depth, rage clicks | Microsoft |
 | Fingerprint | Is this a returning device? Bot, VPN, incognito, tampering | Fingerprint |
+| Thumbmark | A second device ID to compare with Fingerprint; bot, VPN, datacenter, threat level | Thumbmark |
 | Cloudflare Worker + D1 | Home, office, work device, mobile, or VPN; full clickstream per device | Your Cloudflare account |
 
 The Fingerprint `visitorId` and the Worker's network label are tagged into Clarity, so you can
@@ -25,7 +26,7 @@ Setting it up for someone else? See [docs/ONBOARDING.md](docs/ONBOARDING.md).
 
 ## Security
 - This repo contains no IDs, keys, or passwords.
-- Public IDs (GA4, Clarity, Fingerprint public key) go in each site's HTML. They're visible in page source by design.
+- Public IDs (GA4, Clarity, Fingerprint public key, Thumbmark key) go in each site's HTML. Lock the Thumbmark and Fingerprint keys to your domains in their consoles. They're visible in page source by design.
 - The Fingerprint **secret** key lives only as an encrypted Cloudflare Worker secret.
 - The Worker only accepts requests from domains listed in `ALLOWED_ORIGINS`.
 - Visitor data is stored in each site owner's own accounts, never in this repo.
@@ -35,12 +36,16 @@ A "Privacy" link is added to the site footer. It opens a notice written automati
 modules that are switched on. Set `consent` to `"eu-only"` or `"all"` to require opt-in before anything loads.
 
 ## Versions
-Sites load a pinned version from jsDelivr (for example `@v1.2.0`), so updates here never change a live site
+Sites load a pinned version from jsDelivr (for example `@v1.3.0`), so updates here never change a live site
 until its version number is changed.
 
 MIT License.
 
 ## Changelog
+- **1.3.0**: Optional Thumbmark module (`thumbmark.key`): second device ID, bot/VPN/datacenter/threat verdicts, tagged into
+  Clarity and GA4 (`thumbmark_id`, `tm_identified`) and stored in a new `thumbmark_visits` D1 table through a new Worker
+  `/thumbmark` route. Library pinned with an SRI hash; its telemetry is off by default. **Existing installs:** run the new
+  table block from `worker/schema.sql` and redeploy the Worker before enabling the module.
 - **1.2.0**: With Fingerprint enabled, GA4 now receives the visitor ID as the `fingerprint_id` user property
   and an `fp_identified` event (`fingerprint_id`, `fp_event_id`).
 - **1.1.0**: Fingerprint JS agent v4 and Server API v4, custom subdomain support (`fingerprint.endpoint`),

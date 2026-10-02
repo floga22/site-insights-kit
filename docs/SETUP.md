@@ -31,6 +31,31 @@ The kit uses Fingerprint's JavaScript agent **v4**.
    Bot, VPN, proxy, and other Smart Signals depend on your Fingerprint plan; on plans without them,
    those fields stay empty and everything else still works.
 
+## 4b. Thumbmark (optional second device ID)
+Thumbmark's free tier (1,000 calls a month) includes visitor ID, bot, VPN, datacenter, and a 0-5 threat level.
+It does not report incognito, tampering, or virtual machine. Use it next to Fingerprint, or in place of it.
+1. Sign up at thumbmarkjs.com → admin console → **API Keys**.
+2. Rename the key after your site (use one key per site), then copy it → `thumbmark.key`.
+3. **Allowed Hostnames → Add Hostname**: enter your domain and its `www` form (`example.com`, `www.example.com`),
+   then **Save Hostnames**. Protocol, port, and path are stripped. Add `localhost` only while testing locally.
+4. If using the Worker, run the `thumbmark_visits` block from `worker/schema.sql` in the D1 console, and redeploy the Worker
+   from `worker/src/index.js` (it adds the `/thumbmark` route). No new secret is needed.
+
+**About the key.** Thumbmark's key is public by design and ships in your page source. It is not a password.
+Its only protection is the Allowed Hostnames list, so set that before launch. If a key is ever abused, use **Rotate**
+(new key, old one stops working) or **Revoke**, then update `thumbmark.key`. Watch usage under **Usage**.
+
+**Quota.** The script calls Thumbmark once per browser session and reuses the result on later pages.
+
+**Privacy and safety defaults.**
+- The kit turns off the library's own telemetry (`logging: false`). That telemetry otherwise sends your visitors'
+  full raw browser components to Thumbmark and downloads a script from `experimental.thumbmarkjs.com` that runs in your page.
+- The library is pinned to a version with an integrity (SRI) hash, so a changed CDN file won't run.
+- Thumbmark may still send a one-shot beacon (hash and user agent) to its collector when its server asks.
+  Set `thumbmark.beacon: false` to opt out.
+- Only Thumbmark's verdicts are sent to your Worker, never raw components. Those verdicts are relayed by the visitor's
+  browser, so they can be forged. Use them to compare vendors, not to block anyone.
+
 ## 5. Cloudflare Worker
 All in the Cloudflare dashboard, no command line needed.
 

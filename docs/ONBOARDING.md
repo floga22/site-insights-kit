@@ -6,6 +6,7 @@ Send this to the site owner. They create their own accounts, so their visitor da
 - [ ] **Google Analytics**: traffic sources and trends (recommended)
 - [ ] **Microsoft Clarity**: session replays and heatmaps (recommended)
 - [ ] **Fingerprint**: returning-device recognition and bot/VPN detection
+- [ ] **Thumbmark**: second device ID with bot/VPN/datacenter checks (free tier, optional)
 - [ ] **Network and clickstream log** (Cloudflare): home vs. office vs. mobile, full click history. Requires Fingerprint for best results.
 
 ## Send back only these
@@ -14,6 +15,7 @@ Send this to the site owner. They create their own accounts, so their visitor da
 | GA4 Measurement ID (`G-…`) | GA4 → Admin → Data streams | Yes, public |
 | Clarity Project ID | Clarity → Settings → Overview | Yes, public |
 | Fingerprint public key + region | Fingerprint → API keys | Yes, public |
+| Thumbmark API key (after adding your domains under Allowed Hostnames) | Thumbmark → API Keys | Yes, public |
 | Worker URL | Cloudflare → Workers | Yes, public |
 | Contact email for the privacy notice | — | Yes |
 | Audience: mostly US, or EU/UK too? | — | Decides the `consent` setting |
