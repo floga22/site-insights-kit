@@ -36,12 +36,13 @@ A "Privacy" link is added to the site footer. It opens a notice written automati
 modules that are switched on. Set `consent` to `"eu-only"` or `"all"` to require opt-in before anything loads.
 
 ## Versions
-Sites load a pinned version from jsDelivr (for example `@v1.3.0`), so updates here never change a live site
+Sites load a pinned version from jsDelivr (for example `@v1.4.0`), so updates here never change a live site
 until its version number is changed.
 
 MIT License.
 
 ## Changelog
+- **1.4.0**: One random link ID per page view, sent to Fingerprint (`linkedId` and `tags`), Thumbmark (`metadata`), GA4 and Clarity, and stored in D1 on `visits`, `thumbmark_visits` and `events`. GA4 client ID and Clarity user and session IDs are stored with each visit. Thumbmark rows now carry the Fingerprint event ID, so each page view has one Thumbmark record. New `visit_links` and `identity_links` views. Existing installs: run `worker/migrations/2026-10-07-link-id.sql`, then redeploy the Worker.
 - **1.3.0**: Optional Thumbmark module (`thumbmark.key`): second device ID, bot/VPN/datacenter/threat verdicts, tagged into
   Clarity and GA4 (`thumbmark_id`, `tm_identified`) and stored in a new `thumbmark_visits` D1 table through a new Worker
   `/thumbmark` route. Library pinned with an SRI hash; its telemetry is off by default. **Existing installs:** run the new
