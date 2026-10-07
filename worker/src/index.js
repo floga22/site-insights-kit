@@ -243,8 +243,9 @@ async function collect(b, env) {
 async function syncWaf(env) {
   if (!env.DB || !env.CF_API_TOKEN || !env.CF_ZONE_ID) return;
   const until = new Date();
-  const since = new Date(until.getTime() - 60 * 60 * 1000);
-  const query = `query($zone:String!,$since:Time!,$until:Time!){viewer{zones(filter:{zoneTag:$zone}){firewallEventsAdaptive(filter:{datetime_geq:$since,datetime_leq:$until},limit:1000,orderBy:[datetime_ASC]){datetime action clientCountryName clientIP source description clientRequestHTTPHost clientRequestPath rayName}}}}`;
+  // 23 h catch-up: repeats are ignored (event_key is unique), so a missed cron run loses nothing.
+  const since = new Date(until.getTime() - 23 * 60 * 60 * 1000);
+  const query = `query($zone:String!,$since:Time!,$until:Time!){viewer{zones(filter:{zoneTag:$zone}){firewallEventsAdaptive(filter:{datetime_geq:$since,datetime_leq:$until},limit:1000,orderBy:[datetime_DESC]){datetime action clientCountryName clientIP source description clientRequestHTTPHost clientRequestPath rayName}}}}`;
   const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + env.CF_API_TOKEN, 'Content-Type': 'application/json' },
