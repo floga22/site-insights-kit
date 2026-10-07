@@ -245,7 +245,7 @@ async function syncWaf(env) {
   const until = new Date();
   // 23 h catch-up: repeats are ignored (event_key is unique), so a missed cron run loses nothing.
   const since = new Date(until.getTime() - 23 * 60 * 60 * 1000);
-  const query = `query($zone:String!,$since:Time!,$until:Time!){viewer{zones(filter:{zoneTag:$zone}){firewallEventsAdaptive(filter:{datetime_geq:$since,datetime_leq:$until},limit:1000,orderBy:[datetime_DESC]){datetime action clientCountryName clientIP source description clientRequestHTTPHost clientRequestPath rayName}}}}`;
+  const query = `query($zone:String!,$since:Time!,$until:Time!){viewer{zones(filter:{zoneTag:$zone}){firewallEventsAdaptive(filter:{datetime_geq:$since,datetime_leq:$until},limit:1000,orderBy:[datetime_DESC]){datetime action clientCountryName clientIP source description clientRequestHTTPHost clientRequestPath rayName userAgent clientAsn clientASNDescription clientRequestHTTPMethodName edgeResponseStatus}}}}`;
   const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + env.CF_API_TOKEN, 'Content-Type': 'application/json' },
@@ -256,7 +256,10 @@ async function syncWaf(env) {
   const rows = (((j.data || {}).viewer || {}).zones || [])[0]?.firewallEventsAdaptive || [];
   if (!rows.length) return;
   const stmt = env.DB.prepare(
-    'INSERT OR IGNORE INTO waf_events (event_key, ts, country, action, rule, service, ip, host, path, source) VALUES (?,?,?,?,?,?,?,?,?,?)'
+    `INSERT INTO waf_events (event_key, ts, country, action, rule, service, ip, host, path, source, user_agent, asn, asn_desc, method, status)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(event_key) DO UPDATE SET user_agent = excluded.user_agent, asn = excluded.asn, asn_desc = excluded.asn_desc,
+       method = excluded.method, status = excluded.status`
   );
   await env.DB.batch(
     rows.map((r) => {
@@ -265,7 +268,8 @@ async function syncWaf(env) {
       return stmt.bind(
         'api|' + r.rayName + '|' + r.datetime, String(r.datetime).replace('T', ' ').replace(/\.\d+Z$|Z$/, ''),
         clip(r.clientCountryName, 8), action, clip(r.description, 200), clip(r.source, 60), clip(r.clientIP, 64),
-        clip(r.clientRequestHTTPHost, 100), clip(r.clientRequestPath, 300), 'api'
+        clip(r.clientRequestHTTPHost, 100), clip(r.clientRequestPath, 300), 'api',
+        clip(r.userAgent, 300), num(Number(r.clientAsn)), clip(r.clientASNDescription, 100), clip(r.clientRequestHTTPMethodName, 10), num(Number(r.edgeResponseStatus))
       );
     })
   );
