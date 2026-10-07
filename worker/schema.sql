@@ -101,6 +101,6 @@ FROM visit_links WHERE visitor_id IS NOT NULL GROUP BY visitor_id;
 
 
 -- Cloudflare WAF events (blocks, challenges, bypasses, AI Labyrinth), filled by the Worker cron job
-CREATE TABLE IF NOT EXISTS waf_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT UNIQUE, ts TEXT NOT NULL, country TEXT, action TEXT, rule TEXT, service TEXT, ip TEXT, host TEXT, path TEXT, source TEXT);
+CREATE TABLE IF NOT EXISTS waf_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT UNIQUE, ts TEXT NOT NULL, country TEXT, action TEXT, rule TEXT, service TEXT, ip TEXT, host TEXT, path TEXT, source TEXT, user_agent TEXT, asn INTEGER, asn_desc TEXT, method TEXT, status INTEGER);
 CREATE INDEX IF NOT EXISTS idx_waf_ts ON waf_events(ts);
 CREATE INDEX IF NOT EXISTS idx_waf_country ON waf_events(country, action);
