@@ -259,7 +259,7 @@ async function syncWaf(env) {
   );
   await env.DB.batch(
     rows.map((r) => {
-      const trap = /labyrinth/i.test(String(r.action) + ' ' + String(r.source));
+      const trap = /labyrinth|link_?maze/i.test(String(r.action) + ' ' + String(r.source));
       const action = trap ? 'labyrinth' : String(r.action || '').toLowerCase();
       return stmt.bind(
         'api|' + r.rayName + '|' + r.datetime, String(r.datetime).replace('T', ' ').replace(/\.\d+Z$|Z$/, ''),
