@@ -38,3 +38,13 @@ FROM thumbmark_visits WHERE fp_visitor_id IS NOT NULL GROUP BY tm_visitor_id ORD
 SELECT v.ts, v.visitor_id, v.as_org, v.bot AS fp_bot, t.bot AS tm_bot, v.vpn AS fp_vpn, t.vpn AS tm_vpn
 FROM visits v JOIN thumbmark_visits t ON t.sid = v.sid AND t.path = v.path
 WHERE (v.bot = 'bad') <> (t.bot = 1) OR v.vpn IS NOT t.vpn ORDER BY v.ts DESC;
+
+-- Linked IDs (kit 1.4.0)
+-- Every device with all the other IDs seen alongside it
+SELECT * FROM identity_links ORDER BY last_seen DESC LIMIT 50;
+-- One page view with its Thumbmark result, GA4 client and Clarity IDs
+SELECT ts, path, link_id, event_id, visitor_id, tm_visitor_id, tm_hash, ga_client_id, clarity_user_id, clarity_session_id, tm_link
+FROM visit_links ORDER BY ts DESC LIMIT 50;
+-- Fingerprint and Thumbmark disagreeing about bots or VPNs on the same page view
+SELECT ts, path, visitor_id, bot AS fp_bot, tm_bot, vpn AS fp_vpn, tm_vpn FROM visit_links
+WHERE tm_row_id IS NOT NULL AND ((bot = 'bad') <> (tm_bot = 1) OR (vpn = 1) <> (tm_vpn = 1)) ORDER BY ts DESC LIMIT 50;

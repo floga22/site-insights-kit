@@ -1,15 +1,15 @@
 /**
  * site-insights-kit — Cloudflare Worker
  *
- * POST /enrich   { site, eventId, visitorId, sid, path }
+ * POST /enrich   { site, eventId, visitorId, sid, path, linkId, gaClientId, clarityUserId, claritySessionId }
  *   Looks up Fingerprint Smart Signals server-side (secret key never reaches the browser),
  *   classifies the visitor's network (home / office / work-device gateway / mobile / vpn-hosting),
  *   stores the visit in D1, and returns a small profile for tagging in Clarity.
  *
- * POST /collect  { site, sid, visitorId, events: [...] }
+ * POST /collect  { site, sid, visitorId, eventId, linkId, events: [...] }
  *   Stores clickstream events in D1.
  *
- * POST /thumbmark  { site, sid, path, fpVisitorId, tm: {...} }
+ * POST /thumbmark  { site, sid, path, fpVisitorId, fpEventId, linkId, tm: {...} }
  *   Stores Thumbmark's verdicts (browser-reported, unverified) in D1 for comparison with Fingerprint.
  *   Needs no secret: the Thumbmark key is public and is restricted by Allowed Hostnames in its console.
  *
@@ -143,13 +143,15 @@ async function enrich(b, request, env) {
     await env.DB.prepare(
       `INSERT OR REPLACE INTO visits
        (event_id, ts, site, sid, visitor_id, path, ip, asn, as_org, network_label, country, region, city, timezone,
-        work_hours, vpn, proxy, tor, incognito, tampering, bot, vm, suspect_score, id_mismatch, prior_visits, roaming)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+        work_hours, vpn, proxy, tor, incognito, tampering, bot, vm, suspect_score, id_mismatch, prior_visits, roaming,
+        link_id, ga_client_id, clarity_user_id, clarity_session_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).bind(
       clip(eventId || crypto.randomUUID(), 80), new Date().toISOString(), clip(b.site, 100), clip(b.sid, 80),
       clip(b.visitorId, 80), clip(b.path), ip, profile.asn, asOrg, label, profile.country, profile.region,
       profile.city, profile.timezone, b01(workHours), b01(sig.vpn), b01(sig.proxy), b01(sig.tor),
-      b01(sig.incognito), b01(sig.tampering), sig.bot, b01(sig.vm), sig.suspectScore, b01(idMismatch), priorVisits, b01(roaming)
+      b01(sig.incognito), b01(sig.tampering), sig.bot, b01(sig.vm), sig.suspectScore, b01(idMismatch), priorVisits, b01(roaming),
+      clip(b.linkId, 40), clip(b.gaClientId, 80), clip(b.clarityUserId, 80), clip(b.claritySessionId, 80)
     ).run();
   }
 
@@ -194,18 +196,23 @@ async function thumbmark(b, env) {
   if (!env.DB) return { stored: 0 };
   const t = b.tm && typeof b.tm === "object" ? b.tm : null;
   if (!t || !t.visitorId) return { stored: 0 };
-  await env.DB.prepare(
+  const eventId = clip(b.fpEventId, 80);
+  const linkId = clip(b.linkId, 40);
+  // The page can post twice (reload, embedded frame): keep one row per page view, matched by link ID or Fingerprint event ID.
+  const res = await env.DB.prepare(
     `INSERT INTO thumbmark_visits
-     (ts, site, sid, path, fp_visitor_id, tm_visitor_id, thumbmark, bot, vpn, tor, datacenter, danger_level,
+     (ts, site, sid, path, fp_visitor_id, event_id, link_id, tm_visitor_id, thumbmark, bot, vpn, tor, datacenter, danger_level,
       uniqueness, country, asn, is_new, first_seen, last_seen, tz_mismatch, lib_version)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+     SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+     WHERE NOT EXISTS (SELECT 1 FROM thumbmark_visits WHERE (? IS NOT NULL AND link_id = ?) OR (? IS NOT NULL AND event_id = ?))`
   ).bind(
-    new Date().toISOString(), clip(b.site, 100), clip(b.sid, 80), clip(b.path), clip(b.fpVisitorId, 80),
+    new Date().toISOString(), clip(b.site, 100), clip(b.sid, 80), clip(b.path), clip(b.fpVisitorId, 80), eventId, linkId,
     clip(t.visitorId, 80), clip(t.thumbmark, 80), b01(t.bot), b01(t.vpn), b01(t.tor), b01(t.datacenter),
     num(t.dangerLevel), num(t.uniqueness), clip(t.country, 8), num(t.asn), b01(t.isNew),
-    clip(t.firstSeen, 40), clip(t.lastSeen, 40), b01(t.tzMismatch), clip(t.libVersion, 20)
+    clip(t.firstSeen, 40), clip(t.lastSeen, 40), b01(t.tzMismatch), clip(t.libVersion, 20),
+    linkId, linkId, eventId, eventId
   ).run();
-  return { stored: 1 };
+  return { stored: res && res.meta && res.meta.changes ? 1 : 0 };
 }
 
 // ---------------- /collect ----------------
@@ -214,13 +221,13 @@ async function collect(b, env) {
   const events = Array.isArray(b.events) ? b.events.slice(0, 100) : [];
   if (!events.length) return { stored: 0 };
   const stmt = env.DB.prepare(
-    "INSERT INTO events (ts, site, sid, visitor_id, type, path, target, meta) VALUES (?,?,?,?,?,?,?,?)"
+    "INSERT INTO events (ts, site, sid, visitor_id, event_id, link_id, type, path, target, meta) VALUES (?,?,?,?,?,?,?,?,?,?)"
   );
   await env.DB.batch(
     events.map((e) =>
       stmt.bind(
         new Date(Number(e.t) || Date.now()).toISOString(),
-        clip(b.site, 100), clip(b.sid, 80), clip(b.visitorId, 80),
+        clip(b.site, 100), clip(b.sid, 80), clip(b.visitorId, 80), clip(b.eventId, 80), clip(b.linkId, 40),
         clip(e.type, 30), clip(e.path), clip(e.target), clip(e.meta ? JSON.stringify(e.meta) : null, 2000)
       )
     )

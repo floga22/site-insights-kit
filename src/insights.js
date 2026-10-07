@@ -7,10 +7,20 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.3.0";
+  var VERSION = "1.4.0";
   var cfg = window.INSIGHTS_CONFIG || {};
   var CONSENT_KEY = "insights_consent";
   var started = false;
+
+  // One link ID per page load, created before any vendor runs. It is handed to every tool (Fingerprint linkedId,
+  // Thumbmark metadata, GA4, Clarity) and stored with every Worker row, so a single page view can be matched
+  // across all of them even if one vendor fails or loads late. It is random and carries no personal data.
+  var LINK_ID = (function () {
+    try {
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, "").slice(0, 20);
+    } catch (e) {}
+    return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  })();
 
   // ---------- small helpers ----------
   function log() {
@@ -48,6 +58,48 @@
     } catch (e) {
       return "nostorage";
     }
+  }
+
+  // ---------- GA4 + Clarity IDs (stored with the visit so a D1 row can be traced to its GA4 user and Clarity recording) ----------
+  var ext = {}; // { gaClientId, clarityUserId, claritySessionId }
+  var extP = null;
+  function cookieVal(name) {
+    var m = document.cookie.match(new RegExp("(?:^|;\\s*)" + name + "=([^;]+)"));
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+  function collectExternalIds() {
+    if (extP) return extP;
+    var ga = new Promise(function (res) {
+      if (!cfg.ga4 || typeof window.gtag !== "function") return res();
+      try { window.gtag("get", cfg.ga4, "client_id", function (v) { if (v) ext.gaClientId = String(v); res(); }); } catch (e) { res(); }
+    });
+    var cl = new Promise(function (res) {
+      if (!cfg.clarity || typeof window.clarity !== "function") return res();
+      try {
+        window.clarity("metadata", function (m) {
+          m = m || {};
+          var u = m.userId || m.user_id, sid = m.sessionId || m.session_id;
+          if (u) ext.clarityUserId = String(u);
+          if (sid) ext.claritySessionId = String(sid);
+          res();
+        }, false);
+      } catch (e) { res(); }
+    });
+    extP = Promise.all([ga, cl]);
+    return extP;
+  }
+  // Best effort: waits at most maxMs, then falls back to the first-party cookies GA4 and Clarity set.
+  function externalIds(maxMs) {
+    return Promise.race([collectExternalIds(), new Promise(function (r) { setTimeout(r, maxMs); })]).then(function () {
+      if (!ext.gaClientId) {
+        var g = cookieVal("_ga");
+        if (g) { var p = g.split("."); if (p.length >= 4) ext.gaClientId = p[2] + "." + p[3]; }
+      }
+      var ck = cookieVal("_clck"), sk = cookieVal("_clsk");
+      if (!ext.clarityUserId && ck) ext.clarityUserId = ck.split(/[|^]/)[0];
+      if (!ext.claritySessionId && sk) ext.claritySessionId = sk.split(/[|^]/)[0];
+      return ext;
+    });
   }
 
   // ---------- consent ----------
@@ -104,7 +156,7 @@
       ad_personalization: "denied"
     });
     window.gtag("js", new Date());
-    window.gtag("config", cfg.ga4, { allow_google_signals: false });
+    window.gtag("config", cfg.ga4, { allow_google_signals: false, link_id: LINK_ID });
     loadScript("https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(cfg.ga4));
     log("GA4 started");
   }
@@ -127,6 +179,7 @@
     try { if (document.referrer) ref = new URL(document.referrer).hostname; } catch (e) {}
     tag("referrer_domain", ref);
     tag("kit_version", VERSION);
+    tag("link_id", LINK_ID);
     log("Clarity started");
   }
 
@@ -147,17 +200,24 @@
 
     import(src)
       .then(function (FP) { return FP.start(opts); })
-      .then(function (agent) { return agent.get(); })
+      .then(function (agent) {
+        // linkedId and tags are returned by Fingerprint's Server API and shown in its dashboard, so every event can be found by link ID
+        return agent.get({
+          linkedId: LINK_ID,
+          tags: { link_id: LINK_ID, sid: sessionId(), site: cfg.site || location.hostname, path: location.pathname }
+        });
+      })
       .then(function (r) {
         var visitorId = r.visitor_id || r.visitorId;
         var eventId = r.event_id || r.requestId;
         window.INSIGHTS_VISITOR = { visitorId: visitorId, eventId: eventId };
+        stream.eventId = eventId;
         fpResolve(visitorId);
         clarity("identify", visitorId, null, null, "FP-" + String(visitorId).slice(0, 6));
         tag("Fingerprint_ID", visitorId);
         // Make the stable device ID available in GA4 as a user property and as an event parameter
         gtag("set", "user_properties", { fingerprint_id: visitorId });
-        gtag("event", "fp_identified", { fingerprint_id: visitorId, fp_event_id: eventId });
+        gtag("event", "fp_identified", { fingerprint_id: visitorId, fp_event_id: eventId, link_id: LINK_ID });
         tag("FP_Event_ID", eventId);
         if (r.suspect_score !== undefined) tag("FP_Suspect_Score", r.suspect_score);
         stream.visitorId = visitorId;
@@ -175,17 +235,25 @@
   function enrich(r) {
     var url = workerUrl("/enrich");
     if (!url) return;
-    return fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        site: cfg.site || location.hostname,
-        eventId: r.eventId,
-        visitorId: r.visitorId,
-        sid: sessionId(),
-        path: location.pathname
+    // Give GA4 and Clarity a moment to report their IDs (usually ready already), then log them with the visit.
+    return externalIds(1500)
+      .then(function (x) {
+        return fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            site: cfg.site || location.hostname,
+            eventId: r.eventId,
+            visitorId: r.visitorId,
+            sid: sessionId(),
+            path: location.pathname,
+            linkId: LINK_ID,
+            gaClientId: x.gaClientId || null,
+            clarityUserId: x.clarityUserId || null,
+            claritySessionId: x.claritySessionId || null
+          })
+        });
       })
-    })
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (d) {
         if (!d) return;
@@ -251,6 +319,8 @@
         try {
           // logging:false stops the library's own telemetry post and its runtime-fetched "experimental" script.
           var opts = { api_key: tmc.key, logging: tmc.logging === true };
+          // metadata is stored with the Thumbmark request and echoed in its result; it does not change the device hash
+          opts.metadata = function () { return { link_id: LINK_ID, sid: sessionId(), site: cfg.site || location.hostname }; };
           if (tmc.stabilize) opts.stabilize = tmc.stabilize;      // e.g. ["private", "iframe", "vpn"]
           if (tmc.beacon === false) opts.collect_beacon = false;  // opt out of Thumbmark's one-shot collector beacon
           resolve(new window.ThumbmarkJS.Thumbmark(opts).get());
@@ -266,7 +336,7 @@
     });
   }
 
-  function sendThumbmark(c, fpId) {
+  function sendThumbmark(c, fpId, fpEventId) {
     var url = workerUrl("/thumbmark");
     if (!url) return;
     return fetch(url, {
@@ -277,6 +347,8 @@
         sid: sessionId(),
         path: location.pathname,
         fpVisitorId: fpId || null,
+        fpEventId: fpEventId || null,
+        linkId: LINK_ID,
         tm: c
       })
     }).catch(function (e) { log("Thumbmark store failed", e); });
@@ -307,13 +379,13 @@
       // With no Fingerprint module, Thumbmark supplies the replay identity
       if (!(cfg.fingerprint && cfg.fingerprint.key)) clarity("identify", c.visitorId, null, null, "TM-" + String(c.visitorId).slice(0, 6));
       gtag("set", "user_properties", { thumbmark_id: c.visitorId });
-      gtag("event", "tm_identified", { thumbmark_id: c.visitorId });
+      gtag("event", "tm_identified", { thumbmark_id: c.visitorId, link_id: LINK_ID });
       log("Thumbmark", c);
       // Pair with the Fingerprint ID when it resolves (wait up to 5s; send alone if it doesn't)
       var wait = fpDone
         ? Promise.race([fpDone, new Promise(function (res) { setTimeout(function () { res(null); }, 5000); })])
         : Promise.resolve(null);
-      return wait.then(function (fpId) { return sendThumbmark(c, fpId); });
+      return wait.then(function (fpId) { var ev = window.INSIGHTS_VISITOR; return sendThumbmark(c, fpId, ev && ev.eventId); });
     }).catch(function (e) {
       tag("Thumbmark_ID", "error");
       tag("TM_Error", (e && (e.code || e.message)) || e);
@@ -322,7 +394,7 @@
   }
 
   // ---------- module: clickstream ----------
-  var stream = { queue: [], visitorId: null, scrolls: {}, t0: Date.now() };
+  var stream = { queue: [], visitorId: null, eventId: null, scrolls: {}, t0: Date.now() };
 
   function push(type, target, meta) {
     if (!cfg.clickstream || !cfg.worker) return;
@@ -343,6 +415,8 @@
       site: cfg.site || location.hostname,
       sid: sessionId(),
       visitorId: stream.visitorId,
+      eventId: stream.eventId,
+      linkId: LINK_ID,
       events: stream.queue.splice(0, 100)
     });
     // text/plain avoids a CORS preflight, so the beacon survives page unload
@@ -437,7 +511,7 @@
     if (cfg.clarity) items.push("<strong>Microsoft Clarity</strong> records clicks, scrolling, and mouse movement as session replays and heatmaps. Text you type is masked. It uses cookies.");
     if (cfg.fingerprint && cfg.fingerprint.key) items.push("<strong>Fingerprint</strong> creates a device identifier from browser and device characteristics to recognize returning devices and detect bots, VPNs, and automated traffic.");
     if (cfg.thumbmark && cfg.thumbmark.key) items.push("<strong>Thumbmark</strong> creates a second device identifier from browser characteristics and checks the connection for VPNs, data centers, and bots. These details are sent to Thumbmark for analysis.");
-    if (cfg.worker) items.push("<strong>Network and activity log</strong> stores your IP address, network provider, approximate location" + (cfg.clickstream ? ", and the pages and links you click" : "") + " in a private database controlled by " + owner + ".");
+    if (cfg.worker) items.push("<strong>Network and activity log</strong> stores your IP address, network provider, approximate location" + (cfg.clickstream ? ", and the pages and links you click" : "") + " in a private database controlled by " + owner + ". Each page view gets a random reference code that is saved with these records, and with your Google Analytics and Clarity IDs, so they can be matched.");
     var contact = cfg.contactEmail
       ? ' To ask a question or request deletion of data about your visit, email <a href="mailto:' + cfg.contactEmail + '">' + cfg.contactEmail + "</a>."
       : "";
@@ -519,8 +593,10 @@
   function start() {
     if (started) return;
     started = true;
+    window.INSIGHTS_LINK = LINK_ID;
     startGA4();
     startClarity();
+    collectExternalIds();
     startClickTracking();
     if (cfg.clickstream) startClickstream();
     startFingerprint(); // must run before startThumbmark so fpDone exists
