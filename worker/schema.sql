@@ -98,3 +98,9 @@ SELECT visitor_id AS fp_visitor_id, GROUP_CONCAT(DISTINCT tm_visitor_id) AS tm_v
   COUNT(DISTINCT sid) AS sessions, COUNT(*) AS page_views, SUM(tm_row_id IS NOT NULL) AS page_views_with_tm,
   MIN(ts) AS first_seen, MAX(ts) AS last_seen
 FROM visit_links WHERE visitor_id IS NOT NULL GROUP BY visitor_id;
+
+
+-- Cloudflare WAF events (blocks, challenges, bypasses, AI Labyrinth), filled by the Worker cron job
+CREATE TABLE IF NOT EXISTS waf_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT UNIQUE, ts TEXT NOT NULL, country TEXT, action TEXT, rule TEXT, service TEXT, ip TEXT, host TEXT, path TEXT, source TEXT);
+CREATE INDEX IF NOT EXISTS idx_waf_ts ON waf_events(ts);
+CREATE INDEX IF NOT EXISTS idx_waf_country ON waf_events(country, action);

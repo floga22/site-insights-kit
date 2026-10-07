@@ -33,6 +33,11 @@ const HOSTING = /amazon|aws|google cloud|google llc|microsoft|azure|digitalocean
 const BUSINESS_ISP = /business|enterprise|corporate/i;
 
 export default {
+  // Cron: copy Cloudflare WAF events (blocks, challenges, bypasses, AI Labyrinth) into D1 waf_events.
+  // Needs secrets CF_API_TOKEN (Zone > Analytics > Read) and CF_ZONE_ID, plus a cron trigger such as */15 * * * *.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(syncWaf(env));
+  },
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "";
     const allowed = (env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -233,4 +238,34 @@ async function collect(b, env) {
     )
   );
   return { stored: events.length };
+}
+
+async function syncWaf(env) {
+  if (!env.DB || !env.CF_API_TOKEN || !env.CF_ZONE_ID) return;
+  const until = new Date();
+  const since = new Date(until.getTime() - 60 * 60 * 1000);
+  const query = `query($zone:String!,$since:Time!,$until:Time!){viewer{zones(filter:{zoneTag:$zone}){firewallEventsAdaptive(filter:{datetime_geq:$since,datetime_leq:$until},limit:1000,orderBy:[datetime_ASC]){datetime action clientCountryName clientIP source description clientRequestHTTPHost clientRequestPath rayName}}}}`;
+  const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + env.CF_API_TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables: { zone: env.CF_ZONE_ID, since: since.toISOString(), until: until.toISOString() } }),
+  });
+  if (!res.ok) return;
+  const j = await res.json();
+  const rows = (((j.data || {}).viewer || {}).zones || [])[0]?.firewallEventsAdaptive || [];
+  if (!rows.length) return;
+  const stmt = env.DB.prepare(
+    'INSERT OR IGNORE INTO waf_events (event_key, ts, country, action, rule, service, ip, host, path, source) VALUES (?,?,?,?,?,?,?,?,?,?)'
+  );
+  await env.DB.batch(
+    rows.map((r) => {
+      const trap = /labyrinth/i.test(String(r.action) + ' ' + String(r.source));
+      const action = trap ? 'labyrinth' : String(r.action || '').toLowerCase();
+      return stmt.bind(
+        'api|' + r.rayName + '|' + r.datetime, String(r.datetime).replace('T', ' ').replace(/\.\d+Z$|Z$/, ''),
+        clip(r.clientCountryName, 8), action, clip(r.description, 200), clip(r.source, 60), clip(r.clientIP, 64),
+        clip(r.clientRequestHTTPHost, 100), clip(r.clientRequestPath, 300), 'api'
+      );
+    })
+  );
 }

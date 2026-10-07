@@ -25,3 +25,9 @@ UPDATE thumbmark_visits SET event_id = (
 WHERE event_id IS NULL;
 
 -- Then create the two views: copy the "CREATE VIEW IF NOT EXISTS visit_links" and "identity_links" statements from schema.sql.
+
+
+-- Cloudflare WAF events (blocks, challenges, bypasses, AI Labyrinth), filled by the Worker cron job
+CREATE TABLE IF NOT EXISTS waf_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT UNIQUE, ts TEXT NOT NULL, country TEXT, action TEXT, rule TEXT, service TEXT, ip TEXT, host TEXT, path TEXT, source TEXT);
+CREATE INDEX IF NOT EXISTS idx_waf_ts ON waf_events(ts);
+CREATE INDEX IF NOT EXISTS idx_waf_country ON waf_events(country, action);
