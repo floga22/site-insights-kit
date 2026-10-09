@@ -43,6 +43,7 @@ until its version number is changed.
 No license is granted. Copyright (c) 2026 floga22. All rights reserved. Contact the author for permission to use, copy, modify or distribute this code.
 
 ## Changelog
+- **1.4.2**: Worker hardening only, nothing new is collected. Per-IP rate limit (600 per hour), 64 KB body cap, generic 500 responses with the detail kept in logs, and the Fingerprint event ID is validated before the Server API call. Redeploy the Worker. The tracker now reports its version as 1.4.2 (1.4.1 was a licence-only tag).
 - **1.4.0**: One random link ID per page view, sent to Fingerprint (`linkedId` and `tags`), Thumbmark (`metadata`), GA4 and Clarity, and stored in D1 on `visits`, `thumbmark_visits` and `events`. GA4 client ID and Clarity user and session IDs are stored with each visit. Thumbmark rows now carry the Fingerprint event ID, so each page view has one Thumbmark record. New `visit_links` and `identity_links` views. Existing installs: run `worker/migrations/2026-10-07-link-id.sql`, then redeploy the Worker.
 - **1.3.0**: Optional Thumbmark module (`thumbmark.key`): second device ID, bot/VPN/datacenter/threat verdicts, tagged into
   Clarity and GA4 (`thumbmark_id`, `tm_identified`) and stored in a new `thumbmark_visits` D1 table through a new Worker
