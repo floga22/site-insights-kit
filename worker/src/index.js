@@ -32,6 +32,19 @@ const RESIDENTIAL = /comcast|charter|spectrum|cox commun|at&t|att-internet|veriz
 const HOSTING = /amazon|aws|google cloud|google llc|microsoft|azure|digitalocean|linode|akamai|ovh|hetzner|oracle|vultr|choopa|m247|datacamp|leaseweb|contabo|scaleway|alibaba|tencent|hostinger|ionos|godaddy|namecheap|packethub|cdn77|quadranet|colocrossing|psychz|servers\.com|cloudflare|hurricane electric/i;
 const BUSINESS_ISP = /business|enterprise|corporate/i;
 
+// Best-effort per-IP limit (per warm isolate). It blunts casual abuse of the write routes;
+// a Cloudflare rate-limiting rule on this Worker's route is the durable control.
+const HITS = new Map();
+const HITS_PER_HOUR = 600;
+const MAX_BODY = 64 * 1024;
+function overLimit(ip) {
+  const now = Date.now();
+  if (HITS.size > 5000) HITS.clear();
+  const e = HITS.get(ip);
+  if (!e || now - e.t > 3600000) { HITS.set(ip, { t: now, n: 1 }); return false; }
+  return ++e.n > HITS_PER_HOUR;
+}
+
 export default {
   // Cron: copy Cloudflare WAF events (blocks, challenges, bypasses, AI Labyrinth) into D1 waf_events.
   // Needs secrets CF_API_TOKEN (Zone > Analytics > Read) and CF_ZONE_ID, plus a cron trigger such as */15 * * * *.
@@ -53,11 +66,15 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: originOk ? 204 : 403, headers: cors });
     if (!originOk) return json({ error: "origin not allowed" }, 403, cors);
     if (request.method !== "POST") return json({ error: "method not allowed" }, 405, cors);
+    if (overLimit(request.headers.get("CF-Connecting-IP") || "unknown")) return json({ error: "rate limited" }, 429, cors);
+    if (Number(request.headers.get("Content-Length") || 0) > MAX_BODY) return json({ error: "too large" }, 413, cors);
 
     const path = new URL(request.url).pathname;
     let body;
     try {
-      body = JSON.parse(await request.text());
+      const text = await request.text();
+      if (text.length > MAX_BODY) return json({ error: "too large" }, 413, cors);
+      body = JSON.parse(text);
     } catch {
       return json({ error: "bad json" }, 400, cors);
     }
@@ -68,7 +85,8 @@ export default {
       if (path === "/thumbmark") return json(await thumbmark(body, env), 200, cors);
       return json({ error: "not found" }, 404, cors);
     } catch (e) {
-      return json({ error: "server error", detail: String(e && e.message) }, 500, cors);
+      console.error("worker error", path, e && e.message);
+      return json({ error: "server error" }, 500, cors);
     }
   },
 };
@@ -88,7 +106,7 @@ async function enrich(b, request, env) {
   // 1) Fingerprint Smart Signals via Server API v4 (optional; some signals depend on your plan)
   const eventId = b.eventId || b.requestId;
   let ev = null;
-  if (env.FP_SECRET && eventId) {
+  if (env.FP_SECRET && eventId && /^[A-Za-z0-9._-]{8,80}$/.test(String(eventId))) {
     const host = FP_HOSTS[(env.FP_REGION || "us").toLowerCase()] || FP_HOSTS.us;
     const r = await fetch(`${host}/v4/events/${encodeURIComponent(eventId)}`, {
       headers: { Authorization: `Bearer ${env.FP_SECRET}` },
