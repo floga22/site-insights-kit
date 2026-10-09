@@ -39,7 +39,8 @@ modules that are switched on. Set `consent` to `"eu-only"` or `"all"` to require
 Sites load a pinned version from jsDelivr (for example `@v1.4.0`), so updates here never change a live site
 until its version number is changed.
 
-MIT License.
+## License
+No license is granted. Copyright (c) 2026 floga22. All rights reserved. Contact the author for permission to use, copy, modify or distribute this code.
 
 ## Changelog
 - **1.4.0**: One random link ID per page view, sent to Fingerprint (`linkedId` and `tags`), Thumbmark (`metadata`), GA4 and Clarity, and stored in D1 on `visits`, `thumbmark_visits` and `events`. GA4 client ID and Clarity user and session IDs are stored with each visit. Thumbmark rows now carry the Fingerprint event ID, so each page view has one Thumbmark record. New `visit_links` and `identity_links` views. Existing installs: run `worker/migrations/2026-10-07-link-id.sql`, then redeploy the Worker.

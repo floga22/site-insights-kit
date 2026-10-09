@@ -2,7 +2,7 @@
  * site-insights-kit — insights.js
  * One reusable engine. Each site supplies window.INSIGHTS_CONFIG; any module
  * whose ID is missing is skipped. No IDs or keys live in this file.
- * MIT License.
+ * Copyright (c) 2026 floga22. All rights reserved.
  */
 (function () {
   "use strict";
