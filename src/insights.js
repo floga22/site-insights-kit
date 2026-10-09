@@ -7,7 +7,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.4.0";
+  var VERSION = "1.4.2";
   var cfg = window.INSIGHTS_CONFIG || {};
   var CONSENT_KEY = "insights_consent";
   var started = false;
