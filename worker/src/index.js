@@ -190,7 +190,7 @@ async function enrich(b, request, env) {
     fpVisitorId: ev?.identification?.visitor_id ?? null,
     vpn: pick(ev?.vpn),
     proxy: pick(ev?.proxy),
-    tor: pick(ev?.tor),
+    tor: pick(ev?.tor ?? ev?.ip_blocklist?.tor_node),
     incognito: pick(ev?.incognito),
     tampering: pick(ev?.tampering),
     bot: botRaw == null ? null : String(botRaw).replace("not_detected", "notDetected"),
