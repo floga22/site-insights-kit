@@ -207,7 +207,7 @@ async function enrich(b, request, env) {
     rareDevice: pick(ev?.rare_device),
     devTools: pick(ev?.developer_tools),
     privacySettings: pick(ev?.privacy_settings),
-    highActivity: pick(ev?.high_activity),
+    highActivity: pick(ev?.high_activity_device),
   };
   // Guard against spoofed requests: the server-confirmed visitorId must match what the page sent
   const idMismatch = sig.fpVisitorId && b.visitorId && sig.fpVisitorId !== b.visitorId;
