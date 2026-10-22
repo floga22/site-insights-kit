@@ -13,9 +13,14 @@
  *   Stores Thumbmark's verdicts (browser-reported, unverified) in D1 for comparison with Fingerprint.
  *   Needs no secret: the Thumbmark key is public and is restricted by Allowed Hostnames in its console.
  *
+ * POST /crawler  { ua, path, ip, asn, asOrg, country, site, status }   (server to server, Bearer CRAWLER_TOKEN)
+ *   Logs visits from known AI and search crawlers (GPTBot, ClaudeBot, PerplexityBot...) into crawler_hits.
+ *   Crawlers don't run JavaScript, so the site's server-side middleware reports them here. Off unless CRAWLER_TOKEN is set.
+ *
  * Required settings (Cloudflare dashboard → Worker → Settings):
  *   Binding   DB               D1 database created from schema.sql
  *   Secret    FP_SECRET        Fingerprint secret API key (optional; without it, network data only)
+ *   Secret    CRAWLER_TOKEN    shared secret for /crawler (optional; without it the route returns 404)
  *   Variable  FP_REGION        us | eu | ap   (default us)
  *   Variable  ALLOWED_ORIGINS  comma-separated, e.g. https://example.com,https://www.example.com
  */
@@ -45,6 +50,66 @@ function overLimit(ip) {
   return ++e.n > HITS_PER_HOUR;
 }
 
+// ---------------- /crawler ----------------
+// [UA token, category]. First match wins, so specific tokens come before general ones.
+// ai_training = collects content for model training; ai_search = builds an AI search index;
+// ai_assistant = fetched live because a person asked an AI assistant about the page.
+const CRAWLERS = [
+  ["GPTBot", "ai_training"], ["OAI-SearchBot", "ai_search"], ["ChatGPT-User", "ai_assistant"],
+  ["ClaudeBot", "ai_training"], ["Claude-SearchBot", "ai_search"], ["Claude-User", "ai_assistant"], ["anthropic-ai", "ai_training"],
+  ["PerplexityBot", "ai_search"], ["Perplexity-User", "ai_assistant"], ["MistralAI-User", "ai_assistant"], ["DuckAssistBot", "ai_assistant"],
+  ["YouBot", "ai_search"], ["Applebot-Extended", "ai_training"], ["Applebot", "search"],
+  ["Bytespider", "ai_training"], ["CCBot", "ai_training"], ["Amazonbot", "ai_training"], ["cohere-ai", "ai_training"],
+  ["Diffbot", "ai_training"], ["ImagesiftBot", "ai_training"], ["Timpibot", "ai_training"], ["Omgilibot", "ai_training"],
+  ["meta-externalagent", "ai_training"], ["meta-externalfetcher", "ai_assistant"], ["FacebookBot", "ai_training"], ["facebookexternalhit", "social"],
+  ["GoogleOther", "other"], ["Googlebot", "search"], ["bingbot", "search"], ["DuckDuckBot", "search"], ["YandexBot", "search"],
+  ["Baiduspider", "search"], ["PetalBot", "search"],
+  ["SemrushBot", "seo"], ["AhrefsBot", "seo"], ["MJ12bot", "seo"], ["DotBot", "seo"],
+].map(([n, c]) => [n, n.toLowerCase(), c]);
+const CRAWL_SEEN = new Map();
+
+function classifyCrawler(ua) {
+  const l = String(ua || "").toLowerCase();
+  for (const [name, low, category] of CRAWLERS) if (l.includes(low)) return { family: name, category };
+  return null;
+}
+function safeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+async function crawlerRoute(request, env) {
+  if (!env.CRAWLER_TOKEN || !env.DB) return new Response("not found", { status: 404 });
+  if (request.method !== "POST") return new Response(null, { status: 405 });
+  if (!safeEqual(request.headers.get("Authorization") || "", "Bearer " + env.CRAWLER_TOKEN)) return new Response("forbidden", { status: 403 });
+  let b;
+  try {
+    const text = await request.text();
+    if (text.length > 4096) return json({ error: "too large" }, 413, {});
+    b = JSON.parse(text);
+  } catch {
+    return json({ error: "bad json" }, 400, {});
+  }
+  const hit = classifyCrawler(b.ua);
+  if (!hit) return json({ ignored: true }, 200, {});
+  // One row per crawler, page and IP per 10 minutes keeps D1 writes low when a crawler walks the whole site.
+  const key = hit.family + "|" + clip(b.path, 200) + "|" + clip(b.ip, 64);
+  const now = Date.now();
+  if (CRAWL_SEEN.size > 2000) CRAWL_SEEN.clear();
+  if (now - (CRAWL_SEEN.get(key) || 0) < 600000) return json({ deduped: true }, 200, {});
+  CRAWL_SEEN.set(key, now);
+  await env.DB.prepare(
+    `INSERT INTO crawler_hits (ts, site, ua_family, category, ua, ip, asn, as_org, country, path, status, source)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(
+    new Date().toISOString(), clip(b.site, 100), hit.family, hit.category, clip(b.ua, 300), clip(b.ip, 64),
+    Number.isInteger(b.asn) ? b.asn : null, clip(b.asOrg, 120), clip(b.country, 8), clip(b.path, 300),
+    Number.isInteger(b.status) ? b.status : null, "pages-middleware"
+  ).run();
+  return json({ logged: true, family: hit.family, category: hit.category }, 200, {});
+}
+
 export default {
   // Cron: copy Cloudflare WAF events (blocks, challenges, bypasses, AI Labyrinth) into D1 waf_events.
   // Needs secrets CF_API_TOKEN (Zone > Analytics > Read) and CF_ZONE_ID, plus a cron trigger such as */15 * * * *.
@@ -52,6 +117,7 @@ export default {
     ctx.waitUntil(syncWaf(env));
   },
   async fetch(request, env) {
+    if (new URL(request.url).pathname === "/crawler") return crawlerRoute(request, env);
     const origin = request.headers.get("Origin") || "";
     const allowed = (env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
     const originOk = allowed.includes(origin);
@@ -96,6 +162,7 @@ function json(data, status, headers) {
 }
 
 const clip = (v, n = 200) => (v == null ? null : String(v).slice(0, n));
+const str = (v, n = 80) => (typeof v === "string" && v ? v.slice(0, n) : null);
 
 // ---------------- /enrich ----------------
 async function enrich(b, request, env) {
@@ -114,6 +181,11 @@ async function enrich(b, request, env) {
     if (r.ok) ev = await r.json();
   }
   const botRaw = pick(ev?.bot);
+  // Newer v4 fields. Several need a paid plan or only appear when the signal fires: an absent field is stored as
+  // NULL ("not measured"), never as false, so a blank never reads as "clean".
+  const botInfo = ev?.bot_info || null;
+  const proxyDetails = ev?.proxy_details || null;
+  const tamperDetails = ev?.tampering_details || null;
   const sig = {
     fpVisitorId: ev?.identification?.visitor_id ?? null,
     vpn: pick(ev?.vpn),
@@ -124,6 +196,18 @@ async function enrich(b, request, env) {
     bot: botRaw == null ? null : String(botRaw).replace("not_detected", "notDetected"),
     vm: pick(ev?.virtual_machine),
     suspectScore: typeof ev?.suspect_score === "number" ? ev.suspect_score : null,
+    botCategory: str(botInfo?.category),     // ai_agent | ai_browser | browser_automation ...
+    botProvider: str(botInfo?.provider),     // e.g. the company behind a recognized agent
+    botName: str(botInfo?.name),
+    botIdentity: str(botInfo?.identity),     // verified | signed | unknown
+    proxyType: str(proxyDetails?.proxy_type ?? proxyDetails?.type),
+    proxyProvider: str(proxyDetails?.provider),
+    tamperScore: num(tamperDetails?.anomaly_score ?? tamperDetails?.tampering_score),
+    antiDetect: tamperDetails?.anti_detect_browser ?? null,
+    rareDevice: pick(ev?.rare_device),
+    devTools: pick(ev?.developer_tools),
+    privacySettings: pick(ev?.privacy_settings),
+    highActivity: pick(ev?.high_activity),
   };
   // Guard against spoofed requests: the server-confirmed visitorId must match what the page sent
   const idMismatch = sig.fpVisitorId && b.visitorId && sig.fpVisitorId !== b.visitorId;
@@ -167,14 +251,17 @@ async function enrich(b, request, env) {
       `INSERT OR REPLACE INTO visits
        (event_id, ts, site, sid, visitor_id, path, ip, asn, as_org, network_label, country, region, city, timezone,
         work_hours, vpn, proxy, tor, incognito, tampering, bot, vm, suspect_score, id_mismatch, prior_visits, roaming,
-        link_id, ga_client_id, clarity_user_id, clarity_session_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+        link_id, ga_client_id, clarity_user_id, clarity_session_id,
+        bot_category, bot_provider, bot_name, bot_identity, proxy_type, proxy_provider, tamper_score, anti_detect, rare_device, dev_tools, privacy_settings, high_activity)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).bind(
       clip(eventId || crypto.randomUUID(), 80), new Date().toISOString(), clip(b.site, 100), clip(b.sid, 80),
       clip(b.visitorId, 80), clip(b.path), ip, profile.asn, asOrg, label, profile.country, profile.region,
       profile.city, profile.timezone, b01(workHours), b01(sig.vpn), b01(sig.proxy), b01(sig.tor),
       b01(sig.incognito), b01(sig.tampering), sig.bot, b01(sig.vm), sig.suspectScore, b01(idMismatch), priorVisits, b01(roaming),
-      clip(b.linkId, 40), clip(b.gaClientId, 80), clip(b.clarityUserId, 80), clip(b.claritySessionId, 80)
+      clip(b.linkId, 40), clip(b.gaClientId, 80), clip(b.clarityUserId, 80), clip(b.claritySessionId, 80),
+      sig.botCategory, sig.botProvider, sig.botName, sig.botIdentity, sig.proxyType, sig.proxyProvider, sig.tamperScore,
+      b01(sig.antiDetect), b01(sig.rareDevice), b01(sig.devTools), b01(sig.privacySettings), b01(sig.highActivity)
     ).run();
   }
 

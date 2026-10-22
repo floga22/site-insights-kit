@@ -7,7 +7,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.4.2";
+  var VERSION = "1.5.0";
   var cfg = window.INSIGHTS_CONFIG || {};
   var CONSENT_KEY = "insights_consent";
   var started = false;
@@ -393,6 +393,62 @@
     });
   }
 
+  // ---------- module: BotD (free, open-source bot signal) ----------
+  // BotD (MIT) runs entirely in the browser: no account, no API calls, no cost. It catches basic automation
+  // (headless Chrome, Selenium, Puppeteer, Playwright, PhantomJS...). It is a client-side verdict, so treat it as a
+  // hint that sits beside Fingerprint's server-checked verdict and Thumbmark's, never as proof.
+  // Version 2 ships only as an ES module, and import() cannot check an SRI hash. So the file is fetched with an
+  // integrity check (fetch enforces SRI), then imported from a Blob. If the hash does not match, nothing runs.
+  var BOTD_VERSION = "2.0.0";
+  var BOTD_SCRIPT = "https://cdn.jsdelivr.net/npm/@fingerprintjs/botd@" + BOTD_VERSION + "/dist/botd.esm.js";
+  var BOTD_INTEGRITY = "sha384-F/7b00D4hTGqxVecrcxbZDZDRvFLhdsRKF/AzIldvq2hieXOCvP36hhPzctVOT71";
+  var BOTD_CACHE_KEY = "insights_botd";
+
+  function loadBotd(bc) {
+    var src = bc.scriptUrl || BOTD_SCRIPT;
+    var integrity = bc.scriptUrl ? bc.integrity : BOTD_INTEGRITY;
+    var init = { credentials: "omit" };
+    if (integrity) init.integrity = integrity;
+    return fetch(src, init)
+      .then(function (res) { if (!res.ok) throw new Error("botd script HTTP " + res.status); return res.text(); })
+      .then(function (code) {
+        var blobUrl = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+        return import(blobUrl).then(
+          function (m) { URL.revokeObjectURL(blobUrl); return m; },
+          function (e) { URL.revokeObjectURL(blobUrl); throw e; }
+        );
+      })
+      .then(function (m) { return m.load(); })
+      .then(function (botd) { return botd.detect(); });
+  }
+
+  function startBotd() {
+    var bc = cfg.botd;
+    if (!bc) return;
+    bc = bc === true ? {} : bc;
+    var cached = null;
+    try { cached = JSON.parse(sessionStorage.getItem(BOTD_CACHE_KEY) || "null"); } catch (e) {}
+    var run = cached ? Promise.resolve(cached) : loadBotd(bc).then(function (r) {
+      var c = { bot: !!(r && r.bot), kind: (r && r.botKind) || null, v: BOTD_VERSION };
+      try { sessionStorage.setItem(BOTD_CACHE_KEY, JSON.stringify(c)); } catch (e) {}
+      return c;
+    });
+    run.then(function (c) {
+      window.INSIGHTS_BOTD = c;
+      tag("BotD_Bot", c.bot ? "true" : "false");
+      if (c.kind) tag("BotD_Kind", c.kind);
+      if (c.bot) {
+        gtag("event", "botd_flagged", { botd_kind: c.kind || "unknown", link_id: LINK_ID });
+        push("botd", c.kind || "unknown", { bot: true });
+      }
+      log("BotD", c);
+    }).catch(function (e) {
+      tag("BotD_Bot", "error");
+      tag("BotD_Error", (e && (e.code || e.message)) || e);
+      log("BotD error", e);
+    });
+  }
+
   // ---------- module: clickstream ----------
   var stream = { queue: [], visitorId: null, eventId: null, scrolls: {}, t0: Date.now() };
 
@@ -511,6 +567,7 @@
     if (cfg.clarity) items.push("<strong>Microsoft Clarity</strong> records clicks, scrolling, and mouse movement as session replays and heatmaps. Text you type is masked. It uses cookies.");
     if (cfg.fingerprint && cfg.fingerprint.key) items.push("<strong>Fingerprint</strong> creates a device identifier from browser and device characteristics to recognize returning devices and detect bots, VPNs, and automated traffic.");
     if (cfg.thumbmark && cfg.thumbmark.key) items.push("<strong>Thumbmark</strong> creates a second device identifier from browser characteristics and checks the connection for VPNs, data centers, and bots. These details are sent to Thumbmark for analysis.");
+    if (cfg.botd) items.push("<strong>Bot check</strong> runs a short test in your browser to tell people from automated software. The code runs from your browser and the result is attached to your visit in the analytics tools listed here.");
     if (cfg.worker) items.push("<strong>Network and activity log</strong> stores your IP address, network provider, approximate location" + (cfg.clickstream ? ", and the pages and links you click" : "") + " in a private database controlled by " + owner + ". Each page view gets a random reference code that is saved with these records, and with your Google Analytics and Clarity IDs, so they can be matched.");
     var contact = cfg.contactEmail
       ? ' To ask a question or request deletion of data about your visit, email <a href="mailto:' + cfg.contactEmail + '">' + cfg.contactEmail + "</a>."
@@ -601,6 +658,7 @@
     if (cfg.clickstream) startClickstream();
     startFingerprint(); // must run before startThumbmark so fpDone exists
     startThumbmark();
+    startBotd();
   }
 
   function boot() {

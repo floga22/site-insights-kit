@@ -56,6 +56,15 @@ Its only protection is the Allowed Hostnames list, so set that before launch. If
 - Only Thumbmark's verdicts are sent to your Worker, never raw components. Those verdicts are relayed by the visitor's
   browser, so they can be forged. Use them to compare vendors, not to block anyone.
 
+## 4c. BotD (optional, free, no account)
+BotD is an open-source (MIT) browser check from the Fingerprint team. It catches basic automation such as headless Chrome, Selenium, Puppeteer and Playwright. It runs in the visitor's browser and costs nothing.
+
+1. Add `botd: true` to the config block. Nothing else is needed.
+2. Results appear in Clarity as `BotD_Bot` (true or false) and `BotD_Kind`, and in GA4 as a `botd_flagged` event.
+3. It's a browser-reported hint. Treat Fingerprint's server-checked verdict as the authoritative one.
+
+BotD 2.0.0 ships only as an ES module, so the kit downloads it from jsDelivr with an integrity (SRI) check and imports it from a Blob. If the hash doesn't match, nothing runs. If your site sets a Content Security Policy, allow `https://cdn.jsdelivr.net` in `connect-src` and `blob:` in `script-src`.
+
 ## 5. Cloudflare Worker
 All in the Cloudflare dashboard, no command line needed.
 
@@ -71,7 +80,10 @@ All in the Cloudflare dashboard, no command line needed.
    - `ALLOWED_ORIGINS` (Text): `https://yourdomain.com,https://www.yourdomain.com`
    - `FP_REGION` (Text): `us`
    - `FP_SECRET` (**Secret**): your Fingerprint secret key
+   - `CRAWLER_TOKEN` (**Secret**, optional): a long random string. It switches on the `/crawler` route (see "AI crawler log" below).
 5. Copy the Worker's URL (`https://site-insights.<you>.workers.dev`) → `worker` in the config.
+
+**AI crawler log (optional).** AI and search crawlers don't run JavaScript, so the page script never sees them. Your site's server code reports them instead: the Pages middleware in the site repo posts each matching request to `POST /crawler` with `Authorization: Bearer <CRAWLER_TOKEN>`. Set the same token on both sides. The Worker recognizes about 35 crawler names (GPTBot, ClaudeBot, PerplexityBot, Applebot, Bytespider and others), ignores everything else, and writes at most one row per crawler, page and IP every 10 minutes. The user-agent can be faked, so check `as_org` too: OpenAI's crawler, for example, should come from Microsoft's network. Without `CRAWLER_TOKEN` the route returns 404.
 
 **Viewing data:** D1 → `site-insights` → Console. Ready-made queries are in `worker/queries.sql`.
 

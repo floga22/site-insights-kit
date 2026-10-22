@@ -48,3 +48,25 @@ FROM visit_links ORDER BY ts DESC LIMIT 50;
 -- Fingerprint and Thumbmark disagreeing about bots or VPNs on the same page view
 SELECT ts, path, visitor_id, bot AS fp_bot, tm_bot, vpn AS fp_vpn, tm_vpn FROM visit_links
 WHERE tm_row_id IS NOT NULL AND ((bot = 'bad') <> (tm_bot = 1) OR (vpn = 1) <> (tm_vpn = 1)) ORDER BY ts DESC LIMIT 50;
+
+-- Kit 1.5.0: newer Fingerprint fields (NULL = not measured on your plan, not "clean")
+-- Visits Fingerprint recognized as an AI agent or automation tool
+SELECT ts, path, bot_category, bot_provider, bot_name, bot_identity, as_org, country
+FROM visits WHERE bot_category IS NOT NULL ORDER BY ts DESC LIMIT 50;
+
+-- How many visits carry each newer signal at all (shows what your plan actually returns)
+SELECT COUNT(*) AS visits, COUNT(bot_category) AS with_bot_info, COUNT(proxy_type) AS with_proxy_details,
+       COUNT(tamper_score) AS with_tamper_score, COUNT(rare_device) AS with_rare_device
+FROM visits;
+
+-- AI and search crawlers by name and category
+SELECT ua_family, category, COUNT(*) AS hits, COUNT(DISTINCT path) AS pages, MAX(ts) AS last_seen
+FROM crawler_hits GROUP BY ua_family, category ORDER BY hits DESC;
+
+-- AI crawler hits with their network owner, to spot a faked user-agent (compare as_org with the vendor's network)
+SELECT ts, ua_family, as_org, ip, country, path FROM crawler_hits
+WHERE category LIKE 'ai_%' ORDER BY ts DESC LIMIT 50;
+
+-- Pages AI assistants fetched live because someone asked about them
+SELECT path, ua_family, COUNT(*) AS hits FROM crawler_hits WHERE category = 'ai_assistant' GROUP BY path, ua_family ORDER BY hits DESC;
+
