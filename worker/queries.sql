@@ -70,3 +70,7 @@ WHERE category LIKE 'ai_%' ORDER BY ts DESC LIMIT 50;
 -- Pages AI assistants fetched live because someone asked about them
 SELECT path, ua_family, COUNT(*) AS hits FROM crawler_hits WHERE category = 'ai_assistant' GROUP BY path, ua_family ORDER BY hits DESC;
 
+
+-- Kit 1.5.1: VPN/proxy detail per visit. NULL = Fingerprint did not return it (not measured), never "clean".
+SELECT ts, visitor_id, vpn, vpn_confidence, vpn_ml, vpn_methods, vpn_origin_country, proxy, proxy_confidence, proxy_ml, tamper_ml, attack_source, email_spam, asn_type, velocity
+FROM visits ORDER BY ts DESC LIMIT 50;

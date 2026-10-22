@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS visits (
   bot_category TEXT, bot_provider TEXT, bot_name TEXT, bot_identity TEXT,   -- bot_info: recognized AI agents and automation
   proxy_type TEXT, proxy_provider TEXT,                                     -- proxy_details
   tamper_score REAL, anti_detect INTEGER,                                   -- tampering_details
-  rare_device INTEGER, dev_tools INTEGER, privacy_settings INTEGER, high_activity INTEGER
+  rare_device INTEGER, dev_tools INTEGER, privacy_settings INTEGER, high_activity INTEGER,
+  vpn_confidence TEXT, vpn_ml REAL, vpn_methods TEXT, vpn_origin_country TEXT, vpn_origin_tz TEXT, proxy_confidence TEXT, proxy_ml REAL, tamper_ml REAL, tamper_confidence TEXT, attack_source INTEGER, email_spam INTEGER, asn_type TEXT, fp_datacenter INTEGER, velocity TEXT, replayed INTEGER, sdk_version TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_visits_visitor ON visits(visitor_id);
 CREATE INDEX IF NOT EXISTS idx_visits_ts ON visits(ts);

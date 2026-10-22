@@ -208,6 +208,23 @@ async function enrich(b, request, env) {
     devTools: pick(ev?.developer_tools),
     privacySettings: pick(ev?.privacy_settings),
     highActivity: pick(ev?.high_activity_device),
+    // Returned by the Server API on some keys even without the newer add-ons. Absent = NULL (not measured).
+    vpnConfidence: str(ev?.vpn_confidence, 20),
+    vpnMl: num(ev?.vpn_ml_score),
+    vpnMethods: boolKeys(ev?.vpn_methods),
+    vpnOriginCountry: str(ev?.vpn_origin_country, 40),
+    vpnOriginTz: str(ev?.vpn_origin_timezone, 60),
+    proxyConfidence: str(ev?.proxy_confidence, 20),
+    proxyMl: num(ev?.proxy_ml_score),
+    tamperMl: num(ev?.tampering_ml_score),
+    tamperConfidence: str(ev?.tampering_confidence, 20),
+    attackSource: ev?.ip_blocklist?.attack_source ?? null,
+    emailSpam: ev?.ip_blocklist?.email_spam ?? null,
+    asnType: str(ev?.ip_info?.v4?.asn_type, 20),
+    fpDatacenter: ev?.ip_info?.v4?.datacenter_result ?? null,
+    velocity: compactJson(ev?.velocity),
+    replayed: ev?.replayed ?? null,
+    sdkVersion: str(ev?.sdk?.version, 20),
   };
   // Guard against spoofed requests: the server-confirmed visitorId must match what the page sent
   const idMismatch = sig.fpVisitorId && b.visitorId && sig.fpVisitorId !== b.visitorId;
@@ -252,8 +269,9 @@ async function enrich(b, request, env) {
        (event_id, ts, site, sid, visitor_id, path, ip, asn, as_org, network_label, country, region, city, timezone,
         work_hours, vpn, proxy, tor, incognito, tampering, bot, vm, suspect_score, id_mismatch, prior_visits, roaming,
         link_id, ga_client_id, clarity_user_id, clarity_session_id,
-        bot_category, bot_provider, bot_name, bot_identity, proxy_type, proxy_provider, tamper_score, anti_detect, rare_device, dev_tools, privacy_settings, high_activity)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+        bot_category, bot_provider, bot_name, bot_identity, proxy_type, proxy_provider, tamper_score, anti_detect, rare_device, dev_tools, privacy_settings, high_activity,
+        vpn_confidence, vpn_ml, vpn_methods, vpn_origin_country, vpn_origin_tz, proxy_confidence, proxy_ml, tamper_ml, tamper_confidence, attack_source, email_spam, asn_type, fp_datacenter, velocity, replayed, sdk_version)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).bind(
       clip(eventId || crypto.randomUUID(), 80), new Date().toISOString(), clip(b.site, 100), clip(b.sid, 80),
       clip(b.visitorId, 80), clip(b.path), ip, profile.asn, asOrg, label, profile.country, profile.region,
@@ -261,7 +279,10 @@ async function enrich(b, request, env) {
       b01(sig.incognito), b01(sig.tampering), sig.bot, b01(sig.vm), sig.suspectScore, b01(idMismatch), priorVisits, b01(roaming),
       clip(b.linkId, 40), clip(b.gaClientId, 80), clip(b.clarityUserId, 80), clip(b.claritySessionId, 80),
       sig.botCategory, sig.botProvider, sig.botName, sig.botIdentity, sig.proxyType, sig.proxyProvider, sig.tamperScore,
-      b01(sig.antiDetect), b01(sig.rareDevice), b01(sig.devTools), b01(sig.privacySettings), b01(sig.highActivity)
+      b01(sig.antiDetect), b01(sig.rareDevice), b01(sig.devTools), b01(sig.privacySettings), b01(sig.highActivity),
+      sig.vpnConfidence, sig.vpnMl, sig.vpnMethods, sig.vpnOriginCountry, sig.vpnOriginTz, sig.proxyConfidence, sig.proxyMl,
+      sig.tamperMl, sig.tamperConfidence, b01(sig.attackSource), b01(sig.emailSpam), sig.asnType, b01(sig.fpDatacenter),
+      sig.velocity, b01(sig.replayed), sig.sdkVersion
     ).run();
   }
 
@@ -300,6 +321,15 @@ function isWorkHours(tz) {
 // Thumbmark's verdicts are computed by Thumbmark's API but relayed by the visitor's browser, so a caller who
 // bypasses the page could post anything. Stored for comparison only: do not make security decisions from these rows.
 // Every field is whitelisted and coerced; raw strings are clipped.
+const boolKeys = (o) => {
+  if (!o || typeof o !== "object") return null;
+  const on = Object.keys(o).filter((k) => o[k] === true);
+  return on.length ? on.join(",").slice(0, 120) : "none";
+};
+const compactJson = (o, n = 400) => {
+  if (!o || typeof o !== "object") return null;
+  try { return JSON.stringify(o).slice(0, n); } catch { return null; }
+};
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 async function thumbmark(b, env) {
