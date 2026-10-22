@@ -23,7 +23,13 @@ CREATE TABLE IF NOT EXISTS visits (
   link_id            TEXT,           -- random per-page-view code, shared with Fingerprint, Thumbmark, GA4 and Clarity
   ga_client_id       TEXT,           -- GA4 client ID at the time of the visit
   clarity_user_id    TEXT,
-  clarity_session_id TEXT
+  clarity_session_id TEXT,
+  -- Kit 1.5.0: newer Fingerprint v4 fields. NULL = not measured (paid-plan signal, or the signal didn't fire), never "clean".
+  bot_category TEXT, bot_provider TEXT, bot_name TEXT, bot_identity TEXT,   -- bot_info: recognized AI agents and automation
+  proxy_type TEXT, proxy_provider TEXT,                                     -- proxy_details
+  tamper_score REAL, anti_detect INTEGER,                                   -- tampering_details
+  rare_device INTEGER, dev_tools INTEGER, privacy_settings INTEGER, high_activity INTEGER,
+  vpn_confidence TEXT, vpn_ml REAL, vpn_methods TEXT, vpn_origin_country TEXT, vpn_origin_tz TEXT, proxy_confidence TEXT, proxy_ml REAL, tamper_ml REAL, tamper_confidence TEXT, attack_source INTEGER, email_spam INTEGER, asn_type TEXT, fp_datacenter INTEGER, velocity TEXT, replayed INTEGER, sdk_version TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_visits_visitor ON visits(visitor_id);
 CREATE INDEX IF NOT EXISTS idx_visits_ts ON visits(ts);
@@ -104,3 +110,13 @@ FROM visit_links WHERE visitor_id IS NOT NULL GROUP BY visitor_id;
 CREATE TABLE IF NOT EXISTS waf_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT UNIQUE, ts TEXT NOT NULL, country TEXT, action TEXT, rule TEXT, service TEXT, ip TEXT, host TEXT, path TEXT, source TEXT, user_agent TEXT, asn INTEGER, asn_desc TEXT, method TEXT, status INTEGER);
 CREATE INDEX IF NOT EXISTS idx_waf_ts ON waf_events(ts);
 CREATE INDEX IF NOT EXISTS idx_waf_country ON waf_events(country, action);
+
+-- Kit 1.5.0: visits from known AI and search crawlers (no JavaScript runs for these, so the site's server middleware reports them)
+CREATE TABLE IF NOT EXISTS crawler_hits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL, site TEXT,
+  ua_family TEXT,       -- GPTBot, ClaudeBot, PerplexityBot, Applebot...
+  category TEXT,        -- ai_training | ai_search | ai_assistant | search | seo | social | other
+  ua TEXT, ip TEXT, asn INTEGER, as_org TEXT, country TEXT, path TEXT, status INTEGER, source TEXT);
+CREATE INDEX IF NOT EXISTS idx_crawler_ts ON crawler_hits(ts);
+CREATE INDEX IF NOT EXISTS idx_crawler_family ON crawler_hits(ua_family, category);
